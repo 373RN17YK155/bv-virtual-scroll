@@ -1,89 +1,70 @@
 <div class="app-container">
-    <!-- Header -->
-    <header class="app-header">
-        <h1>🚀 {{ title }}</h1>
-        <p class="subtitle">High-performance virtual scrolling with DOM reuse</p>
-    </header>
+  <!-- Header -->
+  <header class="app-header">
+    <h1>🚀 {{ title }}</h1>
+    <p class="subtitle">High-performance virtual scrolling with DOM reuse</p>
+  </header>
 
-    <!-- Controls -->
-    <div class="controls">
-        <div class="mode-buttons">
-            <button (click)="setMode('dynamic-vertical')" [class.active]="currentMode === 'dynamic-vertical'"
-                class="mode-btn">
-                Dynamic Heights
-            </button>
-            <button (click)="setMode('fixed-vertical')" [class.active]="currentMode === 'fixed-vertical'"
-                class="mode-btn">
-                Fixed Heights
-            </button>
-            <button (click)="setMode('horizontal')" [class.active]="currentMode === 'horizontal'" class="mode-btn">
-                Horizontal
-            </button>
-            <button (click)="setMode('large-dataset')" [class.active]="currentMode === 'large-dataset'"
-                class="mode-btn">
-                Large Dataset
-            </button>
-        </div>
-
-        <div class="mode-description">
-            <p>{{ getModeDescription() }}</p>
-        </div>
-
-        <div class="metrics">
-            <div class="metric">
-                <span class="metric-label">Total Items:</span>
-                <span class="metric-value">{{ currentItems.length }}</span>
-            </div>
-            <div class="metric">
-                <span class="metric-label">Direction:</span>
-                <span class="metric-value">{{ currentDirection }}</span>
-            </div>
-            <div class="metric" *ngIf="fixedItemSize">
-                <span class="metric-label">Fixed Size:</span>
-                <span class="metric-value">{{ fixedItemSize }}px</span>
-            </div>
-        </div>
+  <!-- Controls -->
+  <div class="controls">
+    <div class="mode-buttons">
+      <button (click)="setMode('dynamic-vertical')" [class.active]="currentMode === 'dynamic-vertical'"
+        class="mode-btn">
+        Dynamic Heights
+      </button>
+      <button (click)="setMode('fixed-vertical')" [class.active]="currentMode === 'fixed-vertical'" class="mode-btn">
+        Fixed Heights
+      </button>
+      <button (click)="setMode('horizontal')" [class.active]="currentMode === 'horizontal'" class="mode-btn">
+        Horizontal
+      </button>
+      <button (click)="setMode('large-dataset')" [class.active]="currentMode === 'large-dataset'" class="mode-btn">
+        Large Dataset
+      </button>
     </div>
 
-    <!-- Virtual Scroll Container -->
-    <div class="scroll-demo" [class.horizontal-mode]="currentDirection === 'horizontal'">
-        <bv-virtual-scroll-wrapper [items]="currentItems" [direction]="currentDirection" [itemSize]="fixedItemSize"
-            [bufferSize]="5" [trackBy]="trackByItemId">
-            <!-- Before content -->
-            <ng-template #virtualScrollBefore>
-                <div class="scroll-header">
-                    <h3>📋 Item List ({{ currentItems.length }} items)</h3>
-                </div>
-            </ng-template>
+    <div class="mode-description">
+      <p>{{ getModeDescription() }}</p>
+    </div>
 
-            <!-- Item template using component -->
-            <ng-template #virtualScrollItem let-item let-index="index">
-                <app-virtual-scroll-item [item]="item" [index]="index" [direction]="currentDirection" />
-            </ng-template>
-
-            <!-- After content -->
-            <ng-template #virtualScrollAfter>
-                <div class="scroll-footer">
-                    <p>✨ End of list - {{ currentItems.length }} items total</p>
+    <div class="metrics">
+      <div class="metric">
+        <span class="metric-label">Total Items:</span>
+        <span class="metric-value">{{ currentItems.length }}</span>
       </div>
-            </ng-template>
-        </bv-virtual-scroll-wrapper>
+      <div class="metric">
+        <span class="metric-label">Direction:</span>
+        <span class="metric-value">{{ currentDirection }}</span>
       </div>
-
-    <!-- Info Panel -->
-    <div class="info-panel">
-        <h3>ℹ️ How it works</h3>
-        <ul>
-            <li><strong>DOM Reuse:</strong> Items are not destroyed when scrolling out of view. Instead, their content
-                is
-                updated and reused.</li>
-            <li><strong>CSS Flex Order:</strong> Items are repositioned using the CSS <code>order</code> property,
-                keeping
-                them in the DOM.</li>
-            <li><strong>Dynamic Sizing:</strong> ResizeObserver tracks each item's size for accurate scroll
-                calculations.</li>
-            <li><strong>Performance:</strong> Handles thousands of items smoothly by only updating visible elements.
-            </li>
-        </ul>
+      <div class="metric" *ngIf="fixedItemSize">
+        <span class="metric-label">Fixed Size:</span>
+        <span class="metric-value">{{ fixedItemSize }}px</span>
+      </div>
     </div>
   </div>
+
+  <!-- Virtual Scroll Container -->
+  <div class="scroll-demo" [class.horizontal-mode]="currentDirection === 'horizontal'">
+    <bv-virtual-scroll-wrapper [items]="currentItems" [direction]="currentDirection" [itemSize]="fixedItemSize"
+      [bufferSize]="5" [trackBy]="trackByItemId">
+      <!-- Before content -->
+      <ng-template #virtualScrollBefore>
+        <div class="scroll-header">
+          <h3>📋 Item List ({{ currentItems.length }} items)</h3>
+        </div>
+      </ng-template>
+
+      <!-- Item template using component -->
+      <ng-template #virtualScrollItem let-item let-index="index">
+        <app-virtual-scroll-item [item]="item" [index]="index" [direction]="currentDirection" />
+      </ng-template>
+
+      <!-- After content -->
+      <ng-template #virtualScrollAfter>
+        <div class="scroll-footer">
+          <p>✨ End of list - {{ currentItems.length }} items total</p>
+        </div>
+      </ng-template>
+    </bv-virtual-scroll-wrapper>
+  </div>
+</div>

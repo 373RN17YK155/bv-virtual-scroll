@@ -23,7 +23,7 @@ import { throttleTime } from 'rxjs/operators';
 export type ScrollDirection = 'vertical' | 'horizontal';
 
 interface VirtualItem<T> {
-  data: T;
+  data: T | null;
   index: number;      // Data index (changes on scroll)
   offset: number;     // Position offset from top/left
   poolIndex: number;  // Pool index (never changes - for stable tracking)
@@ -33,8 +33,6 @@ interface ItemMeasurement {
   size: number;
   offset: number;
 }
-
-
 
 @Component({
   selector: 'bv-virtual-scroll-wrapper',
@@ -72,7 +70,9 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
   private viewportSize = signal(0);
   private itemSizeCache = new Map<number, ItemMeasurement>(); // Stores size and offset
   private resizeObserver?: ResizeObserver;
+  private mutationObserver?: MutationObserver;
   private scrollSubscription?: Subscription;
+  private observedElements = new Set<HTMLElement>(); // Track which elements are being observed
   private defaultItemSize = 50; // Default estimated size for unmeasured items
 
   // Virtual items pool
@@ -140,6 +140,14 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
         untracked(() => this.initializePool());
       }
     });
+
+    effect(() => {
+      const contentContainer = this.contentContainer();
+
+      if (contentContainer) {
+        this.setupMutationObserver();
+      }
+    })
   }
 
   ngAfterContentInit(): void {
@@ -156,8 +164,67 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
     }
+    if (this.mutationObserver) {
+      this.mutationObserver.disconnect();
+    }
     if (this.scrollSubscription) {
       this.scrollSubscription.unsubscribe();
+    }
+  }
+
+  private setupMutationObserver(): void {
+    if (typeof MutationObserver === 'undefined') {
+      return;
+    }
+
+    this.mutationObserver = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        // Handle new child nodes added to the pool
+        if (mutation.type === 'childList') {
+          const addedNodes = Array.from(mutation.addedNodes)
+            .filter((node): node is HTMLElement => node instanceof HTMLElement);
+
+          addedNodes.forEach((element) => {
+            this.observeElement(element);
+          });
+        }
+
+        // Handle data-index attribute changes
+        if (mutation.type === 'attributes' && mutation.attributeName === 'data-index') {
+          const element = mutation.target as HTMLElement;
+          const dataIndex = element.getAttribute('data-index');
+
+          if (dataIndex !== null) {
+            // Make sure element is being observed by ResizeObserver
+            this.observeElement(element);
+          }
+        }
+      }
+    });
+
+    const contentContainer = this.contentContainer();
+    if (contentContainer) {
+      this.mutationObserver.observe(contentContainer.nativeElement, {
+        childList: true,      // Watch for added/removed nodes
+        subtree: false,       // Don't watch descendants
+        attributes: true,     // Watch for attribute changes
+        attributeFilter: ['data-index'], // Only watch data-index attribute
+        characterData: false
+      });
+    }
+  }
+
+  /**
+   * Observe an element with ResizeObserver
+   * Prevents duplicate observations
+   */
+  private observeElement(element: HTMLElement): void {
+    if (!this.resizeObserver) return;
+
+    // Only observe if not already being observed
+    if (!this.observedElements.has(element)) {
+      this.resizeObserver.observe(element);
+      this.observedElements.add(element);
     }
   }
 
@@ -189,10 +256,11 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
             const estimatedSize = cachedSize ?? this.getEstimatedSize();
             const sizeDifference = size - estimatedSize;
 
-            // Note: offset will be updated in calculateMeasurements during recalc
-            // For now, we keep the old offset if it exists
-            const oldOffset = cachedData?.offset ?? 0;
-            this.itemSizeCache.set(index, { size, offset: oldOffset });
+            const previousItemSize = this.itemSizeCache.get(index - 1)?.size ?? this.beforeContentSize();
+            const previousItemOffset = this.itemSizeCache.get(index - 1)?.offset ?? 0;
+            const offset = previousItemOffset + previousItemSize;
+
+            this.itemSizeCache.set(index, { size, offset });
 
             // Adjust total size incrementally
             totalSizeAdjustment += sizeDifference;
@@ -224,18 +292,18 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
     // Observe viewport size changes
     const scrollContainer = this.scrollContainer();
     if (scrollContainer) {
-      this.resizeObserver.observe(scrollContainer.nativeElement);
+      this.observeElement(scrollContainer.nativeElement);
     }
 
-    // Observe before/after content size changes
+    // Observe before/after content (if they exist)
     const beforeContent = this.beforeContent();
     if (beforeContent) {
-      this.resizeObserver.observe(beforeContent.nativeElement);
+      this.observeElement(beforeContent.nativeElement);
     }
 
     const afterContent = this.afterContent();
     if (afterContent) {
-      this.resizeObserver.observe(afterContent.nativeElement);
+      this.observeElement(afterContent.nativeElement);
     }
   }
 
@@ -354,29 +422,23 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
 
     // Update existing pool items instead of creating new array
     this.virtualItems.update(pool => {
-      const updatedPool = [...pool]; // Shallow copy for change detection
+      return pool.map((_, poolIndex) => {
+        const dataIdx = bufferedStart + poolIndex;
+        const isVisible = dataIdx <= bufferedEnd && dataIdx < items.length;
+        const index = isVisible ? dataIdx : -999999999;
+        const offset = isVisible ? measurements[dataIdx].offset : -999999999;
+        const data = isVisible ? items[dataIdx] : null;
 
-      for (let poolIdx = 0; poolIdx < pool.length; poolIdx++) {
-        const dataIdx = bufferedStart + poolIdx;
-
-        if (dataIdx <= bufferedEnd && dataIdx < items.length) {
-          // Update existing pool item with new data
-          updatedPool[poolIdx] = {
-            poolIndex: poolIdx,
-            data: items[dataIdx],
-            index: dataIdx,
-            offset: measurements[dataIdx].offset
-          };
+        return {
+          poolIndex,
+          index,
+          offset,
+          data,
         }
-      }
-
-      return updatedPool;
+      });
     });
 
     this.cdr.markForCheck();
-
-    // Observe new elements for size changes
-    this.observeVisibleElements();
   }
 
   private calculateMeasurements(): ItemMeasurement[] {
@@ -460,20 +522,6 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
     }
 
     return { startIndex, endIndex };
-  }
-
-  private observeVisibleElements(): void {
-    const contentContainer = this.contentContainer();
-    if (!this.resizeObserver || !contentContainer) return;
-
-    // Disconnect existing observations on content elements
-    // (keeping scroll container observation)
-
-    // Observe all virtual item elements
-    const elements = contentContainer.nativeElement.querySelectorAll('[data-index]');
-    elements.forEach((element) => {
-      this.resizeObserver!.observe(element as HTMLElement);
-    });
   }
 
   trackByPoolIndex(_: number, item: VirtualItem<T>): number {

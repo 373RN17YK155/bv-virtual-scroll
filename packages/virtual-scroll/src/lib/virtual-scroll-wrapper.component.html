@@ -19,12 +19,13 @@
 
     <!-- Virtual items pool with absolute positioning -->
     @for (item of virtualItems(); track trackByPoolIndex($index, item)) {
-      <div
-        class="virtual-item"
-        [attr.data-index]="item.index"
-        [attr.data-pool-index]="item.poolIndex"
-        [style.transform]="isVertical() ? 'translateY(' + item.offset + 'px)' : 'translateX(' + item.offset + 'px)'"
-      >
+        <div
+          class="virtual-item"
+          [attr.data-index]="item.index"
+          [attr.data-pool-index]="item.poolIndex"
+          [style.transform]="isVertical() ? 'translateY(' + item.offset + 'px)' : 'translateX(' + item.offset + 'px)'"
+          [style.visibility]="item.data === null ? 'hidden' : 'visible'"
+        >
         @if (itemTemplate()) {
           <ng-container *ngTemplateOutlet="itemTemplate() ?? null; context: getItemContext(item)"></ng-container>
         }

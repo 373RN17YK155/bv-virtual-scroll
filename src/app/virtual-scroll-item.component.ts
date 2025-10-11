@@ -2,7 +2,6 @@ import {
   Component,
   input,
   ChangeDetectionStrategy,
-  OnInit,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import type { ScrollDirection } from '@vladislavburko/virtual-scroll';
@@ -10,45 +9,49 @@ import type { ScrollDirection } from '@vladislavburko/virtual-scroll';
 /**
  * Demo component for rendering virtual scroll items
  * This demonstrates how the item HTML from the demo can be extracted into a reusable component
+ * Handles null items gracefully when they're outside the visible pool
  */
 @Component({
   selector: 'app-virtual-scroll-item',
   standalone: true,
   imports: [CommonModule],
   template: `
-    <!-- Vertical item -->
-    @if (direction() === 'vertical') {
-      <div
-        class="item"
-        [style.backgroundColor]="item().color"
-        [style.minHeight.px]="item().height || 'auto'"
-      >
-        <div class="item-header">
-          <span class="item-index">#{{ index() }}</span>
-          <span class="item-id">ID: {{ item().id }}</span>
+    <!-- Only render if item data exists -->
+    @if (item()) {
+      <!-- Vertical item -->
+      @if (direction() === 'vertical') {
+        <div
+          class="item"
+          [style.backgroundColor]="item()!.color"
+          [style.minHeight.px]="item()!.height || 'auto'"
+        >
+          <div class="item-header">
+            <span class="item-index">#{{ index() }}</span>
+            <span class="item-id">ID: {{ item()!.id }}</span>
+          </div>
+          <div class="item-content">
+            {{ item()!.text }}
+          </div>
+          <div class="item-footer" *ngIf="item()!.height">
+            Height: {{ item()!.height }}px
+          </div>
         </div>
-        <div class="item-content">
-          {{ item().text }}
-        </div>
-        <div class="item-footer" *ngIf="item().height">
-          Height: {{ item().height }}px
-        </div>
-      </div>
-    }
+      }
 
-    <!-- Horizontal item -->
-    @if (direction() === 'horizontal') {
-      <div
-        class="item horizontal-item"
-        [style.backgroundColor]="item().color"
-      >
-        <div class="item-header">
-          <span class="item-index">#{{ index() }}</span>
+      <!-- Horizontal item -->
+      @if (direction() === 'horizontal') {
+        <div
+          class="item horizontal-item"
+          [style.backgroundColor]="item()!.color"
+        >
+          <div class="item-header">
+            <span class="item-index">#{{ index() }}</span>
+          </div>
+          <div class="item-content">
+            {{ item()!.text }}
+          </div>
         </div>
-        <div class="item-content">
-          {{ item().text }}
-        </div>
-      </div>
+      }
     }
   `,
   styles: [`
@@ -114,14 +117,10 @@ import type { ScrollDirection } from '@vladislavburko/virtual-scroll';
   `],
   changeDetection: ChangeDetectionStrategy.OnPush
 })
-export class VirtualScrollItemComponent implements OnInit {
-  // Inputs
-  item = input.required<any>();
+export class VirtualScrollItemComponent {
+  // Inputs - item can be null when outside visible pool
+  item = input.required<any | null>();
   index = input.required<number>();
   direction = input.required<ScrollDirection>();
-
-  ngOnInit(): void {
-    console.log('VirtualScrollItemComponent initialized');
-  }
 }
 
