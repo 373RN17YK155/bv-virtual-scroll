@@ -13,6 +13,7 @@ import {
   signal,
   computed,
   effect,
+  untracked,
   ViewEncapsulation,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
@@ -71,7 +72,6 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
   private scrollOffset = signal(0);
   private viewportSize = signal(0);
   private itemSizeCache = new Map<number, CachedItemData>(); // Stores size and offset
-  private cacheSizeSignal = signal(0); // Reactive tracker for cache size changes
   private resizeObserver?: ResizeObserver;
   private scrollThrottleTimeout?: any;
   private defaultItemSize = 50; // Default estimated size for unmeasured items
@@ -84,29 +84,16 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
   isVertical = computed(() => this.direction() === 'vertical');
 
   // Calculate fixed pool size based on viewport and buffer
-  // This uses estimated/average size, might need adjustment after actual measurements
   poolSize = computed(() => {
     const viewport = this.viewportSize();
     const buffer = this.bufferSize();
-    // Track cache size signal to make this reactive
-    const cacheSize = this.cacheSizeSignal();
-
-    // Use actual measured average if available, otherwise default
-    let avgSize = this.itemSize();
-    if (!avgSize && cacheSize > 0) {
-      const sizes = Array.from(this.itemSizeCache.values()).map(d => d.size);
-      avgSize = sizes.reduce((a, b) => a + b, 0) / sizes.length;
-    }
-    if (!avgSize) {
-      avgSize = this.defaultItemSize;
-    }
+    const itemSize = this.itemSize() ?? this.defaultItemSize;
 
     if (viewport === 0) return buffer * 2 + 1;
 
-    // Calculate how many items fit in viewport with some extra room
-    const viewportItems = Math.ceil(viewport / avgSize);
-    // Add buffers on both sides + some extra for safety
-    return Math.max(viewportItems + (buffer * 2) + 2, buffer * 2 + 1);
+    // Calculate how many items fit in viewport
+    const viewportItems = Math.ceil(viewport / itemSize);
+    return viewportItems + (buffer * 2);
   });
 
   // Automatically track before/after content sizes
@@ -132,25 +119,27 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
   });
 
   constructor(private cdr: ChangeDetectorRef) {
-    // Effect to initialize pool when items or pool size changes
+    // Effect to initialize pool ONLY when items or pool size changes
+    // DO NOT call recalculate here - it will be called by scroll/resize handlers
     effect(() => {
       const items = this.items();
       const pool = this.poolSize();
 
       if (!items || items.length === 0) {
-        this.virtualItems.set([]);
+        untracked(() => this.virtualItems.set([]));
         return;
       }
 
-      // Create fixed pool only if it doesn't exist or size changed
-      const current = this.virtualItems();
+      // Use untracked to read virtualItems without creating dependency
+      // This prevents infinite loop when virtualItems is updated
+      const currentPoolLength = untracked(() => this.virtualItems().length);
       const targetPoolSize = Math.min(pool, items.length);
 
-      if (current.length !== targetPoolSize) {
-        this.initializePool();
+      // Only initialize pool if size changed
+      // Don't call recalculate here - it causes infinite loop
+      if (currentPoolLength !== targetPoolSize) {
+        untracked(() => this.initializePool());
       }
-      // Note: recalculate() is called separately on scroll, not here
-      // to avoid infinite loop since recalculate updates virtualItems
     }, { allowSignalWrites: true });
   }
 
@@ -158,7 +147,8 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
     this.setupResizeObserver();
     this.measureViewport();
     this.initializeTotalSize();
-    // Initial recalculate will happen after pool is initialized via effect
+
+    // Give time for pool to initialize, then recalculate
     setTimeout(() => this.recalculate(), 0);
   }
 
@@ -199,17 +189,14 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
             const estimatedSize = cachedSize ?? this.getEstimatedSize();
             const sizeDifference = size - estimatedSize;
 
-                // Note: offset will be updated in calculateMeasurements during recalc
-                // For now, we keep the old offset if it exists
-                const oldOffset = cachedData?.offset ?? 0;
-                this.itemSizeCache.set(index, { size, offset: oldOffset });
+            // Note: offset will be updated in calculateMeasurements during recalc
+            // For now, we keep the old offset if it exists
+            const oldOffset = cachedData?.offset ?? 0;
+            this.itemSizeCache.set(index, { size, offset: oldOffset });
 
-                // Update cache size signal to trigger poolSize recalculation
-                this.cacheSizeSignal.set(this.itemSizeCache.size);
-
-                // Adjust total size incrementally
-                totalSizeAdjustment += sizeDifference;
-                needsRecalc = true;
+            // Adjust total size incrementally
+            totalSizeAdjustment += sizeDifference;
+            needsRecalc = true;
           }
         }
 
@@ -287,8 +274,8 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
 
     this.virtualItems.set(fixedPool);
 
-    // Calculate correct positions asynchronously to avoid effect loop
-    setTimeout(() => this.recalculate(), 0);
+    // Now calculate correct positions
+    this.recalculate();
   }
 
   private updateTotalSize(): void {
@@ -338,7 +325,7 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
       return;
     }
 
-    let pool = this.virtualItems();
+    const pool = this.virtualItems();
     if (pool.length === 0) {
       // Pool not initialized yet
       return;
@@ -362,65 +349,27 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
     const bufferedStart = Math.max(0, startIndex - bufferSize);
     const bufferedEnd = Math.min(items.length - 1, endIndex + bufferSize);
 
-    // Calculate how many items we actually need to render
-    const neededItems = bufferedEnd - bufferedStart + 1;
+    // Update existing pool items instead of creating new array
+    this.virtualItems.update(pool => {
+      const updatedPool = [...pool]; // Shallow copy for change detection
 
-    // Check if pool needs resizing
-    if (pool.length < neededItems) {
-      // Pool too small, need to resize
-      console.warn(`Pool size (${pool.length}) < needed items (${neededItems}). Recreating pool.`);
-      // Don't return - continue with current pool to prevent blank frame
-      // The effect will recreate the pool and recalculate will run again
-      setTimeout(() => {
-        this.initializePool();
-      }, 0);
-    }
-
-    // Update existing pool items BY MUTATING them (preserve object identity)
-    // This ensures DOM nodes are NEVER destroyed, only their properties change
-    const renderCount = Math.min(pool.length, neededItems);
-    const usedIndices = new Set<number>(); // Track used data indices to prevent duplicates
-
-    for (let poolIdx = 0; poolIdx < pool.length; poolIdx++) {
-      const poolItem = pool[poolIdx]; // Get existing object reference
-
-      if (poolIdx < renderCount) {
-        // Render visible + buffered items
+      for (let poolIdx = 0; poolIdx < pool.length; poolIdx++) {
         const dataIdx = bufferedStart + poolIdx;
 
-        if (dataIdx >= 0 && dataIdx < items.length && dataIdx <= bufferedEnd) {
-          // Validate no duplicate indices
-          if (usedIndices.has(dataIdx)) {
-            console.error(`Duplicate data index ${dataIdx} detected! This will cause overlap.`);
-            // Hide this duplicate - MUTATE existing object
-            poolItem.data = items[0];
-            poolItem.index = -1;
-            poolItem.offset = -10000;
-          } else {
-            usedIndices.add(dataIdx);
-            // Update existing object properties (DO NOT create new object)
-            poolItem.data = items[dataIdx];
-            poolItem.index = dataIdx;
-            poolItem.offset = measurements[dataIdx].offset;
-            // poolIndex never changes
-          }
-        } else {
-          // Invalid index - hide this item - MUTATE existing object
-          poolItem.data = items[0];
-          poolItem.index = -1;
-          poolItem.offset = -10000;
+        if (dataIdx <= bufferedEnd && dataIdx < items.length) {
+          // Update existing pool item with new data
+          updatedPool[poolIdx] = {
+            poolIndex: pool[poolIdx].poolIndex, // Keep stable pool index
+            data: items[dataIdx],
+            index: dataIdx,
+            offset: measurements[dataIdx].offset
+          };
         }
-      } else {
-        // Hide unused pool items - MUTATE existing object
-        poolItem.data = items[0];
-        poolItem.index = -1;
-        poolItem.offset = -10000;
       }
-    }
 
-    // DO NOT update the signal - that would trigger @for recreation!
-    // Just mark for change detection to update bindings
-    // The array reference stays the same, objects mutated in place
+      return updatedPool;
+    });
+
     this.cdr.markForCheck();
 
     // Observe new elements for size changes
@@ -448,19 +397,9 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
 
       // Update cache with current offset (size is already cached from ResizeObserver)
       const cachedData = this.itemSizeCache.get(i);
-      const wasNew = !cachedData;
-
       if (cachedData) {
         // Update offset in cache if size is already cached
         this.itemSizeCache.set(i, { size: cachedData.size, offset });
-      } else {
-        // If not cached, set both size and offset
-        this.itemSizeCache.set(i, { size, offset });
-      }
-
-      // Update cache size signal if we added a new entry
-      if (wasNew) {
-        this.cacheSizeSignal.set(this.itemSizeCache.size);
       }
 
       measurements.push({ size, offset });
@@ -558,10 +497,6 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
   }
 
   getItemContext(item: VirtualItem<T>) {
-    // Don't provide context for hidden items
-    if (item.index === -1) {
-      return { $implicit: null as any, index: -1 };
-    }
     return {
       $implicit: item.data,
       index: item.index,

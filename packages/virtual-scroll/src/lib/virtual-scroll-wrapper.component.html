@@ -25,9 +25,8 @@
         [attr.data-index]="item.index"
         [attr.data-pool-index]="item.poolIndex"
         [style.transform]="isVertical() ? 'translateY(' + item.offset + 'px)' : 'translateX(' + item.offset + 'px)'"
-        [style.visibility]="item.index === -1 ? 'hidden' : 'visible'"
       >
-        @if (itemTemplate() && item.index !== -1) {
+        @if (itemTemplate()) {
           <ng-container *ngTemplateOutlet="itemTemplate() ?? null; context: getItemContext(item)"></ng-container>
         }
       </div>

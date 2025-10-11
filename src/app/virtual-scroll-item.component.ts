@@ -3,7 +3,6 @@ import {
   input,
   ChangeDetectionStrategy,
   OnInit,
-  OnDestroy,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import type { ScrollDirection } from '@vladislavburko/virtual-scroll';
@@ -115,7 +114,7 @@ import type { ScrollDirection } from '@vladislavburko/virtual-scroll';
   `],
   changeDetection: ChangeDetectionStrategy.OnPush
 })
-export class VirtualScrollItemComponent implements OnInit, OnDestroy {
+export class VirtualScrollItemComponent implements OnInit {
   // Inputs
   item = input.required<any>();
   index = input.required<number>();
@@ -123,10 +122,6 @@ export class VirtualScrollItemComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     console.log('VirtualScrollItemComponent initialized');
-  }
-
-  ngOnDestroy(): void {
-    console.log('VirtualScrollItemComponent destroyed');
   }
 }
 
