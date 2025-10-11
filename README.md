@@ -1,27 +1,147 @@
-# VirtualScroll
+# Virtual Scroll Package
 
-This project was generated with [Angular CLI](https://github.com/angular/angular-cli) version 17.3.8.
+This repository contains a high-performance virtual scroll library for Angular with an innovative DOM reuse strategy.
 
-## Development server
+## 📦 What's Inside
 
-Run `ng serve` for a dev server. Navigate to `http://localhost:4200/`. The application will automatically reload if you change any of the source files.
+- **Library** (`packages/virtual-scroll/`) - The virtual scroll component package
+- **Demo App** (`src/`) - Interactive demo showcasing all features
 
-## Code scaffolding
+## 🚀 Quick Start
 
-Run `ng generate component component-name` to generate a new component. You can also use `ng generate directive|pipe|service|class|guard|interface|enum|module`.
+### Install Dependencies
 
-## Build
+```bash
+npm install
+```
 
-Run `ng build` to build the project. The build artifacts will be stored in the `dist/` directory.
+### Run Demo Application
 
-## Running unit tests
+```bash
+npm start
+```
 
-Run `ng test` to execute the unit tests via [Karma](https://karma-runner.github.io).
+Open [http://localhost:4200](http://localhost:4200) in your browser.
 
-## Running end-to-end tests
+### Build Library
 
-Run `ng e2e` to execute the end-to-end tests via a platform of your choice. To use this command, you need to first add a package that implements end-to-end testing capabilities.
+```bash
+npm run build:lib
+```
 
-## Further help
+The built library will be in `dist/virtual-scroll/`.
 
-To get more help on the Angular CLI use `ng help` or go check out the [Angular CLI Overview and Command Reference](https://angular.io/cli) page.
+### Watch Library (Development)
+
+```bash
+npm run watch:lib
+```
+
+## 📚 Library Documentation
+
+See the [library README](packages/virtual-scroll/README.md) for detailed documentation on using the virtual scroll component.
+
+## 🎯 Features
+
+- **DOM Reuse Strategy**: Elements stay in DOM, only content changes
+- **Dynamic & Fixed Sizing**: Support for both modes
+- **Vertical & Horizontal**: Dual direction support
+- **High Performance**: Handles 10,000+ items smoothly
+- **ResizeObserver**: Automatic size tracking
+- **Standalone Components**: Modern Angular architecture
+
+## 🏗️ Project Structure
+
+```
+virtual-scroll/
+├── packages/
+│   └── virtual-scroll/          # Library source
+│       ├── src/
+│       │   ├── lib/             # Components & directives
+│       │   └── public-api.ts    # Public exports
+│       ├── ng-package.json      # Library build config
+│       └── package.json         # Library package config
+├── src/                         # Demo application
+│   └── app/
+│       ├── app.component.ts     # Demo examples
+│       └── ...
+├── angular.json                 # Angular workspace config
+├── package.json                 # Root package config
+└── README.md                    # This file
+```
+
+## 🛠️ Development
+
+### Adding Features
+
+1. Edit library files in `packages/virtual-scroll/src/lib/`
+2. Build the library: `npm run build:lib`
+3. The demo app will pick up changes automatically
+
+### Running Tests
+
+```bash
+npm test
+```
+
+## 📝 Scripts
+
+- `npm start` - Start demo application
+- `npm run build` - Build demo application
+- `npm run build:lib` - Build library package
+- `npm run watch:lib` - Watch library for changes
+- `npm test` - Run tests
+
+## 🌟 Demo Features
+
+The demo application showcases:
+
+1. **Dynamic Heights** - Items with varying heights
+2. **Fixed Heights** - Optimized uniform list
+3. **Horizontal Scroll** - Side-scrolling items
+4. **Large Dataset** - 10,000 items performance test
+
+## 📦 Publishing
+
+To publish the library to npm:
+
+1. Build the library:
+   ```bash
+   npm run build:lib
+   ```
+
+2. Navigate to the built library:
+   ```bash
+   cd dist/virtual-scroll
+   ```
+
+3. Publish to npm:
+   ```bash
+   npm publish --access public
+   ```
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) file for details.
+
+## 🐛 Issues
+
+Found a bug or have a feature request? Please [open an issue](https://github.com/vladislavburko/virtual-scroll/issues).
+
+## 👤 Author
+
+**Vladislav Burko**
+
+---
+
+⭐ If you find this project useful, please consider giving it a star on GitHub!

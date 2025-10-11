@@ -1,0 +1,23 @@
+{
+  "name": "@vladislavburko/virtual-scroll",
+  "version": "1.0.0",
+  "description": "High-performance virtual scroll component for Angular with DOM element reuse",
+  "keywords": [
+    "angular",
+    "virtual-scroll",
+    "performance",
+    "list",
+    "scrolling"
+  ],
+  "author": "Vladislav Burko",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vladislavburko/virtual-scroll.git"
+  },
+  "peerDependencies": {
+    "@angular/common": "^17.0.0",
+    "@angular/core": "^17.0.0"
+  }
+}
+

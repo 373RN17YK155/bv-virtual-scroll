@@ -3,6 +3,29 @@
   "version": 1,
   "newProjectRoot": "projects",
   "projects": {
+    "virtual-scroll-lib": {
+      "projectType": "library",
+      "root": "packages/virtual-scroll",
+      "sourceRoot": "packages/virtual-scroll/src",
+      "prefix": "bv",
+      "architect": {
+        "build": {
+          "builder": "@angular-devkit/build-angular:ng-packagr",
+          "options": {
+            "project": "packages/virtual-scroll/ng-package.json"
+          },
+          "configurations": {
+            "production": {
+              "tsConfig": "packages/virtual-scroll/tsconfig.lib.json"
+            },
+            "development": {
+              "tsConfig": "packages/virtual-scroll/tsconfig.lib.json"
+            }
+          },
+          "defaultConfiguration": "production"
+        }
+      }
+    },
     "virtual-scroll": {
       "projectType": "application",
       "schematics": {},

@@ -1,0 +1,18 @@
+# Source files
+src/
+*.ts
+!*.d.ts
+
+# Config files
+tsconfig.json
+tsconfig.lib.json
+ng-package.json
+
+# IDE
+.vscode/
+.idea/
+
+# Tests
+*.spec.ts
+**/*.spec.ts
+

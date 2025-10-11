@@ -1,0 +1,44 @@
+<div
+  #scrollContainer
+  class="virtual-scroll-container"
+  [class.vertical]="isVertical()"
+  [class.horizontal]="!isVertical()"
+  (scroll)="onScroll($event)"
+>
+  <div
+    #contentContainer
+    class="virtual-scroll-content"
+    [style.height.px]="isVertical() ? totalSize() : null"
+    [style.width.px]="!isVertical() ? totalSize() : null"
+  >
+    <!-- Before content -->
+    @if (beforeTemplate()) {
+      <div #beforeContent class="virtual-scroll-before">
+        <ng-container *ngTemplateOutlet="beforeTemplate() ?? null"></ng-container>
+      </div>
+    }
+
+    <!-- Virtual items pool with absolute positioning -->
+    @for (item of virtualItems(); track trackByPoolIndex($index, item)) {
+      <div
+        class="virtual-item"
+        [attr.data-index]="item.index"
+        [attr.data-pool-index]="item.poolIndex"
+        [style.transform]="isVertical() ? 'translateY(' + item.offset + 'px)' : 'translateX(' + item.offset + 'px)'"
+        [style.visibility]="item.index === -1 ? 'hidden' : 'visible'"
+      >
+        @if (itemTemplate() && item.index !== -1) {
+          <ng-container *ngTemplateOutlet="itemTemplate() ?? null; context: getItemContext(item)"></ng-container>
+        }
+      </div>
+    }
+
+    <!-- After content -->
+    @if (afterTemplate()) {
+      <div #afterContent class="virtual-scroll-after"
+           [style.transform]="isVertical() ? 'translateY(' + afterContentOffset() + 'px)' : 'translateX(' + afterContentOffset() + 'px)'">
+        <ng-container *ngTemplateOutlet="afterTemplate() ?? null"></ng-container>
+      </div>
+    }
+  </div>
+</div>
