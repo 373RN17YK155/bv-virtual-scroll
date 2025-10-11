@@ -17,6 +17,8 @@ import {
   ViewEncapsulation,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { fromEvent, Subscription } from 'rxjs';
+import { throttleTime } from 'rxjs/operators';
 
 export type ScrollDirection = 'vertical' | 'horizontal';
 
@@ -32,10 +34,7 @@ interface ItemMeasurement {
   offset: number;
 }
 
-interface CachedItemData {
-  size: number;
-  offset: number;
-}
+
 
 @Component({
   selector: 'bv-virtual-scroll-wrapper',
@@ -53,7 +52,7 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
   // Inputs as signals
   items = input<T[]>([]);
   itemSize = input<number | undefined>(undefined); // Fixed size mode (optional)
-  bufferSize = input<number>(5);
+  bufferSize = input<number>(3);
   direction = input<ScrollDirection>('vertical');
   trackBy = input<TrackByFunction<T> | undefined>(undefined);
 
@@ -71,9 +70,9 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
   // Signals for reactive state management
   private scrollOffset = signal(0);
   private viewportSize = signal(0);
-  private itemSizeCache = new Map<number, CachedItemData>(); // Stores size and offset
+  private itemSizeCache = new Map<number, ItemMeasurement>(); // Stores size and offset
   private resizeObserver?: ResizeObserver;
-  private scrollThrottleTimeout?: any;
+  private scrollSubscription?: Subscription;
   private defaultItemSize = 50; // Default estimated size for unmeasured items
 
   // Virtual items pool
@@ -140,13 +139,14 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
       if (currentPoolLength !== targetPoolSize) {
         untracked(() => this.initializePool());
       }
-    }, { allowSignalWrites: true });
+    });
   }
 
   ngAfterContentInit(): void {
     this.setupResizeObserver();
     this.measureViewport();
     this.initializeTotalSize();
+    this.setupScrollListener();
 
     // Give time for pool to initialize, then recalculate
     setTimeout(() => this.recalculate(), 0);
@@ -156,8 +156,8 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
     }
-    if (this.scrollThrottleTimeout) {
-      clearTimeout(this.scrollThrottleTimeout);
+    if (this.scrollSubscription) {
+      this.scrollSubscription.unsubscribe();
     }
   }
 
@@ -293,15 +293,18 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
     this.totalSize.set(beforeSize + itemsTotal + afterSize);
   }
 
-  onScroll(event: Event): void {
-    if (this.scrollThrottleTimeout) {
-      return;
-    }
+  private setupScrollListener(): void {
+    const scrollContainer = this.scrollContainer();
+    if (!scrollContainer) return;
 
-    this.scrollThrottleTimeout = setTimeout(() => {
-      this.scrollThrottleTimeout = undefined;
-      this.updateScrollPosition();
-    }, 16); // ~60fps
+    // Use RxJS fromEvent for better scroll handling
+    this.scrollSubscription = fromEvent(scrollContainer.nativeElement, 'scroll')
+      .pipe(
+        throttleTime(16, undefined, { leading: true, trailing: true }) // ~60fps
+      )
+      .subscribe(() => {
+        this.updateScrollPosition();
+      });
   }
 
   private updateScrollPosition(): void {
@@ -359,7 +362,7 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
         if (dataIdx <= bufferedEnd && dataIdx < items.length) {
           // Update existing pool item with new data
           updatedPool[poolIdx] = {
-            poolIndex: pool[poolIdx].poolIndex, // Keep stable pool index
+            poolIndex: poolIdx,
             data: items[dataIdx],
             index: dataIdx,
             offset: measurements[dataIdx].offset
@@ -377,36 +380,18 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
   }
 
   private calculateMeasurements(): ItemMeasurement[] {
-    const measurements: ItemMeasurement[] = [];
-    const items = this.items();
-    // Start from before content size - item 0 begins after before content
-    let offset = this.beforeContentSize();
-
-    for (let i = 0; i < items.length; i++) {
-      let size: number;
-
+    return this.items().map((_, index) => {
       const itemSize = this.itemSize();
-      if (itemSize !== undefined) {
-        // Fixed size mode
-        size = itemSize;
-      } else {
-        // Dynamic size mode - use cached size or default
-        const cachedData = this.itemSizeCache.get(i);
-        size = cachedData?.size ?? this.defaultItemSize;
-      }
+      const cachedData = this.itemSizeCache.get(index);
+      const size = itemSize !== undefined ? itemSize : cachedData?.size ?? this.defaultItemSize;
+      const previousItemSize = this.itemSizeCache.get(index - 1)?.size ?? this.beforeContentSize();
+      const previousItemOffset = this.itemSizeCache.get(index - 1)?.offset ?? 0;
+      const offset = previousItemOffset + previousItemSize;
 
-      // Update cache with current offset (size is already cached from ResizeObserver)
-      const cachedData = this.itemSizeCache.get(i);
-      if (cachedData) {
-        // Update offset in cache if size is already cached
-        this.itemSizeCache.set(i, { size: cachedData.size, offset });
-      }
+      this.itemSizeCache.set(index, { size, offset });
 
-      measurements.push({ size, offset });
-      offset += size; // Next item starts after this one
-    }
-
-    return measurements;
+      return { size, offset };
+    });
   }
 
   private getEstimatedSize(): number {
@@ -491,7 +476,7 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
     });
   }
 
-  trackByPoolIndex(index: number, item: VirtualItem<T>): number {
+  trackByPoolIndex(_: number, item: VirtualItem<T>): number {
     // Track by stable pool index - this ensures DOM nodes are never recreated
     return item.poolIndex;
   }
