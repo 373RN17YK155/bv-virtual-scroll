@@ -1,120 +1,224 @@
-<!-- 82ba2440-e7bd-455a-8c80-da5c8ed1d676 248c70ba-66bc-4755-9173-7143a439fbcd -->
-# Fix DOM Node Recreation - True Virtual Scrolling
+<!-- 82ba2440-e7bd-455a-8c80-da5c8ed1d676 0550bb6e-3e7c-4d43-a42e-6e93734eaa65 -->
+# Optimize Offset Recalculation Performance
 
-## Problem
+## Overview
 
-Currently, `virtualItems` creates/destroys DOM nodes on every scroll because the array changes:
+Refactor the resize and recalculation logic to:
+1. Separate concerns (measurement, positioning, rendering)
+2. Batch resize events before recalculation
+3. Only recalculate downstream items from resized element
+4. Keep incremental offset updates in ResizeObserver
 
-- `@for` loop creates new elements for new indices
-- DOM nodes are recreated instead of reused
-- Performance impact from constant DOM manipulation
+## Current Problems
 
-## Solution
-
-Create a **fixed pool** of DOM elements that:
-
-1. Is initialized once based on viewport + buffer size
-2. Never changes in count (unless items input changes)
-3. Only updates content and position properties
-4. Truly reuses the same DOM nodes
+- Every resize triggers full `recalculate()` and `updateTotalSize()`
+- No batching of multiple resize events
+- Offset calculation mixed between ResizeObserver and `calculateMeasurements()`
+- Full array iteration even when only one item resized
 
 ## Implementation Steps
 
-### 1. Add Pool Size Calculation
+### 1. Add Batching Infrastructure
 
-**File**: `virtual-scroll-wrapper.component.ts`
+**File**: `packages/virtual-scroll/src/lib/virtual-scroll-wrapper.component.ts`
 
-Add computed for pool size:
+Add batching properties:
 
 ```typescript
-// Calculate fixed pool size based on viewport and buffer
-poolSize = computed(() => {
-  const viewport = this.viewportSize();
-  const buffer = this.bufferSize();
-  const itemSize = this.itemSize() ?? this.defaultItemSize;
-  
-  if (viewport === 0) return buffer * 2 + 1;
-  
-  // Calculate how many items fit in viewport
-  const viewportItems = Math.ceil(viewport / itemSize);
-  return viewportItems + (buffer * 2);
-});
+// After other private properties
+private resizeBatch = new Map<number, number>(); // index → new size
+private resizeBatchTimeout?: any;
+private minAffectedIndex: number = Infinity;
 ```
 
-### 2. Initialize Fixed Pool
+### 2. Refactor ResizeObserver to Batch Updates
 
-**File**: `virtual-scroll-wrapper.component.ts`
+**File**: `packages/virtual-scroll/src/lib/virtual-scroll-wrapper.component.ts`
 
-Change `virtualItems` initialization in `ngAfterContentInit` or effect:
+In `setupResizeObserver()`, replace the current resize handling logic:
 
 ```typescript
-effect(() => {
-  const items = this.items();
-  const pool = this.poolSize();
+// Current: processes each resize immediately
+if (indexStr !== null) {
+  const index = parseInt(indexStr, 10);
+  const size = this.direction() === 'vertical' ? entry.contentRect.height : entry.contentRect.width;
   
-  if (items.length === 0) {
-    this.virtualItems.set([]);
-    return;
-  }
+  const cachedData = this.itemSizeCache.get(index);
+  const cachedSize = cachedData?.size;
   
-  // Create fixed pool only if it doesn't exist or size changed
-  const current = this.virtualItems();
-  if (current.length !== Math.min(pool, items.length)) {
-    this.initializePool();
+  if (size > 0 && (cachedSize === undefined || Math.abs(cachedSize - size) > 0.5)) {
+    // Add to batch instead of processing immediately
+    this.resizeBatch.set(index, size);
+    this.minAffectedIndex = Math.min(this.minAffectedIndex, index);
+    
+    // Schedule batch processing
+    this.scheduleBatchedRecalculation();
   }
-}, { allowSignalWrites: true });
+}
 ```
 
-### 3. Create `initializePool()` Method
+### 3. Create Batch Processing Method
+
+**File**: `packages/virtual-scroll/src/lib/virtual-scroll-wrapper.component.ts`
+
+Add new method after `setupResizeObserver()`:
 
 ```typescript
-private initializePool(): void {
-  const items = this.items();
-  const pool = Math.min(this.poolSize(), items.length);
+/**
+ * Schedule batched recalculation (debounced)
+ */
+private scheduleBatchedRecalculation(): void {
+  if (this.resizeBatchTimeout) {
+    clearTimeout(this.resizeBatchTimeout);
+  }
   
-  // Create fixed array of virtual items
-  const fixedPool: VirtualItem<T>[] = [];
-  for (let i = 0; i < pool; i++) {
-    fixedPool.push({
-      data: items[i],
-      index: i,
-      offset: 0,
-      poolIndex: i // Add stable pool index for tracking
+  this.resizeBatchTimeout = setTimeout(() => {
+    this.processBatchedResizes();
+  }, 16); // ~60fps, batch multiple resizes in same frame
+}
+
+/**
+ * Process all batched resize events at once
+ */
+private processBatchedResizes(): void {
+  if (this.resizeBatch.size === 0) return;
+  
+  let totalSizeAdjustment = 0;
+  
+  // Update cache and calculate size differences
+  for (const [index, newSize] of this.resizeBatch) {
+    const cachedData = this.itemSizeCache.get(index);
+    const oldSize = cachedData?.size ?? this.defaultItemSize;
+    const sizeDifference = newSize - oldSize;
+    
+    // Update cache with new size (offset will be recalculated below)
+    this.itemSizeCache.set(index, {
+      size: newSize,
+      offset: cachedData?.offset ?? 0
     });
+    
+    totalSizeAdjustment += sizeDifference;
   }
   
-  this.virtualItems.set(fixedPool);
+  // Adjust total size incrementally
+  if (totalSizeAdjustment !== 0) {
+    this.totalSize.update(current => current + totalSizeAdjustment);
+  }
+  
+  // Recalculate offsets only for affected items (from minAffectedIndex onwards)
+  this.recalculateOffsetsFrom(this.minAffectedIndex);
+  
+  // Update visible items positions
+  this.updateVisibleItemPositions();
+  
+  // Clear batch
+  this.resizeBatch.clear();
+  this.minAffectedIndex = Infinity;
+  
+  this.cdr.markForCheck();
 }
 ```
 
-### 4. Update `VirtualItem` Interface
+### 4. Create Incremental Offset Recalculation
 
-Add `poolIndex` for stable tracking:
+**File**: `packages/virtual-scroll/src/lib/virtual-scroll-wrapper.component.ts`
+
+Add new method for incremental offset updates:
 
 ```typescript
-interface VirtualItem<T> {
-  data: T;
-  index: number;      // Data index (changes on scroll)
-  offset: number;
-  poolIndex: number;  // Pool index (never changes)
+/**
+ * Recalculate offsets only from a specific index onwards
+ * More performant than full recalculation
+ */
+private recalculateOffsetsFrom(startIndex: number): void {
+  const items = this.items();
+  if (startIndex >= items.length) return;
+  
+  // Get the offset to start from
+  let currentOffset: number;
+  
+  if (startIndex === 0) {
+    // First item starts after before content
+    currentOffset = this.beforeContentSize();
+  } else {
+    // Start from previous item's end
+    const prevCache = this.itemSizeCache.get(startIndex - 1);
+    if (!prevCache) return; // Can't calculate without previous item
+    currentOffset = prevCache.offset + prevCache.size;
+  }
+  
+  // Update offsets for all subsequent items
+  for (let i = startIndex; i < items.length; i++) {
+    const cachedData = this.itemSizeCache.get(i);
+    const size = cachedData?.size ?? this.defaultItemSize;
+    
+    // Update cache with new offset
+    this.itemSizeCache.set(i, { size, offset: currentOffset });
+    
+    currentOffset += size;
+  }
 }
 ```
 
-### 5. Refactor `recalculate()` to Update Pool
+### 5. Separate Visible Item Position Updates
 
-Instead of creating new array, update existing items:
+**File**: `packages/virtual-scroll/src/lib/virtual-scroll-wrapper.component.ts`
+
+Extract position update logic from `recalculate()`:
+
+```typescript
+/**
+ * Update only the positions of currently visible pool items
+ * Called after offset cache is updated
+ */
+private updateVisibleItemPositions(): void {
+  const items = this.items();
+  if (!items || items.length === 0) return;
+  
+  const pool = this.virtualItems();
+  if (pool.length === 0) return;
+  
+  // Update positions of pool items based on current cache
+  this.virtualItems.update(currentPool => {
+    return currentPool.map((poolItem) => {
+      if (poolItem.index >= 0 && poolItem.index < items.length) {
+        const cachedData = this.itemSizeCache.get(poolItem.index);
+        if (cachedData) {
+          return {
+            ...poolItem,
+            offset: cachedData.offset
+          };
+        }
+      }
+      return poolItem;
+    });
+  });
+}
+```
+
+### 6. Refactor Main `recalculate()` Method
+
+**File**: `packages/virtual-scroll/src/lib/virtual-scroll-wrapper.component.ts`
+
+Simplify `recalculate()` to focus on visible range calculation:
 
 ```typescript
 private recalculate(): void {
   const items = this.items();
   if (!items || items.length === 0) {
     this.virtualItems.set([]);
+    this.totalSize.set(0);
     return;
   }
 
+  const pool = this.virtualItems();
+  if (pool.length === 0) return;
+
   const viewport = this.viewportSize();
   const scroll = this.scrollOffset();
-  const measurements = this.calculateMeasurements();
+
+  // Get measurements (reads from cache, doesn't recalculate)
+  const measurements = this.getMeasurementsFromCache();
 
   // Find visible range
   const { startIndex, endIndex } = this.findVisibleRange(
@@ -127,76 +231,105 @@ private recalculate(): void {
   const bufferSize = this.bufferSize();
   const bufferedStart = Math.max(0, startIndex - bufferSize);
   const bufferedEnd = Math.min(items.length - 1, endIndex + bufferSize);
-  
-  // Update existing pool items instead of creating new array
+
+  // Update pool items with new data indices and offsets
   this.virtualItems.update(pool => {
-    const updatedPool = [...pool]; // Create shallow copy for change detection
-    
-    for (let poolIdx = 0; poolIdx < pool.length; poolIdx++) {
-      const dataIdx = bufferedStart + poolIdx;
-      
-      if (dataIdx <= bufferedEnd) {
-        updatedPool[poolIdx] = {
-          ...pool[poolIdx],
-          data: items[dataIdx],
-          index: dataIdx,
-          offset: measurements[dataIdx].offset
-        };
+    return pool.map((_, poolIndex) => {
+      const dataIdx = bufferedStart + poolIndex;
+      const isVisible = dataIdx <= bufferedEnd && dataIdx < items.length;
+      const index = isVisible ? dataIdx : -999999999;
+      const cachedData = this.itemSizeCache.get(dataIdx);
+      const offset = isVisible && cachedData ? cachedData.offset : -999999999;
+      const data = isVisible ? items[dataIdx] : null;
+
+      return {
+        poolIndex,
+        index,
+        offset,
+        data,
       }
-    }
-    
-    return updatedPool;
+    });
   });
+
+  this.cdr.markForCheck();
 }
 ```
 
-### 6. Update Template Tracking
+### 7. Add Cache Reading Method
 
-**File**: `virtual-scroll-wrapper.component.html`
+**File**: `packages/virtual-scroll/src/lib/virtual-scroll-wrapper.component.ts`
 
-Change `@for` to track by `poolIndex` (stable):
-
-```html
-@for (item of virtualItems(); track item.poolIndex) {
-  <div
-    class="virtual-item"
-    [attr.data-index]="item.index"
-    [style.transform]="isVertical() ? 'translateY(' + item.offset + 'px)' : 'translateX(' + item.offset + 'px)'"
-  >
-    @if (itemTemplate()) {
-      <ng-container *ngTemplateOutlet="itemTemplate() ?? null; context: getItemContext(item)"></ng-container>
-    }
-  </div>
-}
-```
-
-### 7. Update `trackByIndex` Method
+Add helper to read measurements from cache without recalculation:
 
 ```typescript
-trackByPoolIndex(index: number, item: VirtualItem<T>): number {
-  return item.poolIndex; // Track by stable pool index, not data index
+/**
+ * Get measurements from cache (read-only, no recalculation)
+ */
+private getMeasurementsFromCache(): ItemMeasurement[] {
+  const items = this.items();
+  const measurements: ItemMeasurement[] = [];
+  
+  for (let i = 0; i < items.length; i++) {
+    const cached = this.itemSizeCache.get(i);
+    measurements.push({
+      size: cached?.size ?? this.defaultItemSize,
+      offset: cached?.offset ?? 0
+    });
+  }
+  
+  return measurements;
 }
 ```
 
-## Expected Behavior
+### 8. Remove Old `calculateMeasurements()` Method
 
-✅ **Fixed pool size** - DOM nodes count stays constant
+**File**: `packages/virtual-scroll/src/lib/virtual-scroll-wrapper.component.ts`
 
-✅ **No recreation** - Same DOM nodes reused
+Delete the current `calculateMeasurements()` method as it's replaced by:
+- `recalculateOffsetsFrom()` for offset updates
+- `getMeasurementsFromCache()` for reading
 
-✅ **Content updates** - Only data, index, offset change
+### 9. Update Cleanup
 
-✅ **Better performance** - No DOM creation/destruction
+**File**: `packages/virtual-scroll/src/lib/virtual-scroll-wrapper.component.ts`
 
-✅ **Stable tracking** - `poolIndex` never changes
+Add cleanup for batch timeout:
 
-## Benefits
+```typescript
+ngOnDestroy(): void {
+  if (this.resizeObserver) {
+    this.resizeObserver.disconnect();
+  }
+  if (this.mutationObserver) {
+    this.mutationObserver.disconnect();
+  }
+  if (this.scrollSubscription) {
+    this.scrollSubscription.unsubscribe();
+  }
+  // Add batch timeout cleanup
+  if (this.resizeBatchTimeout) {
+    clearTimeout(this.resizeBatchTimeout);
+  }
+}
+```
 
-- True DOM reuse (original requirement)
-- Better performance (no DOM manipulation)
-- Smoother scrolling
-- Lower memory usage
-- Fewer garbage collections
+## Expected Improvements
+
+**Performance:**
+- 10 rapid resizes → 1 recalculation (batching)
+- Only recalculate downstream items, not entire list
+- Cache reads instead of recalculations during scroll
+
+**Code Organization:**
+- Clear separation: measurement (ResizeObserver) vs. positioning (recalculateOffsetsFrom) vs. rendering (recalculate)
+- Incremental updates instead of full recalculations
+- Predictable data flow: Resize → Batch → Update Cache → Update Offsets → Update Positions
+
+**Declarative:**
+- Each method has single responsibility
+- Data flows one direction: Input → Process → Output
+- No mixed concerns between observers and calculations
+
 
 ### To-dos
 
