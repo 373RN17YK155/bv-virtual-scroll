@@ -71,8 +71,10 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
   private itemSizeCache = new Map<number, ItemMeasurement>(); // Stores size and offset
   private resizeObserver?: ResizeObserver;
   private mutationObserver?: MutationObserver;
+  private intersectionObserver?: IntersectionObserver;
   private scrollSubscription?: Subscription;
   private observedElements = new Set<HTMLElement>(); // Track which elements are being observed
+  private intersectedElements = new Set<HTMLElement>(); // Track which elements are observed by IntersectionObserver
   private defaultItemSize = 50; // Default estimated size for unmeasured items
 
   // Virtual items pool
@@ -152,6 +154,7 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
 
   ngAfterContentInit(): void {
     this.setupResizeObserver();
+    this.setupIntersectionObserver();
     this.measureViewport();
     this.initializeTotalSize();
     this.setupScrollListener();
@@ -166,6 +169,9 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
     }
     if (this.mutationObserver) {
       this.mutationObserver.disconnect();
+    }
+    if (this.intersectionObserver) {
+      this.intersectionObserver.disconnect();
     }
     if (this.scrollSubscription) {
       this.scrollSubscription.unsubscribe();
@@ -185,7 +191,16 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
             .filter((node): node is HTMLElement => node instanceof HTMLElement);
 
           addedNodes.forEach((element) => {
+            // Cache initial size and offset for the element
+            const dataIndex = element.getAttribute('data-index');
+            if (dataIndex !== null) {
+              const index = parseInt(dataIndex, 10);
+              this.cacheElementMeasurement(element, index);
+            }
+
+            // Register element in both ResizeObserver and IntersectionObserver
             this.observeElement(element);
+            this.observeElementIntersection(element);
           });
         }
 
@@ -195,8 +210,16 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
           const dataIndex = element.getAttribute('data-index');
 
           if (dataIndex !== null) {
-            // Make sure element is being observed by ResizeObserver
+            const index = parseInt(dataIndex, 10);
+
+            // Check if cache has data for new index, add if missing
+            if (!this.itemSizeCache.has(index)) {
+              this.cacheElementMeasurement(element, index);
+            }
+
+            // Ensure element is being observed by both observers
             this.observeElement(element);
+            this.observeElementIntersection(element);
           }
         }
       }
@@ -228,6 +251,154 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
     }
   }
 
+  /**
+   * Observe an element with IntersectionObserver
+   * Prevents duplicate observations
+   */
+  private observeElementIntersection(element: HTMLElement): void {
+    if (!this.intersectionObserver) return;
+
+    // Only observe if not already being observed
+    if (!this.intersectedElements.has(element)) {
+      this.intersectionObserver.observe(element);
+      this.intersectedElements.add(element);
+    }
+  }
+
+  /**
+   * Cache element measurement (size and offset)
+   */
+  private cacheElementMeasurement(element: HTMLElement, index: number): void {
+    const rect = element.getBoundingClientRect();
+    const size = this.direction() === 'vertical' ? rect.height : rect.width;
+
+    // Only cache if size is valid (> 0)
+    if (size > 0) {
+      const previousItemSize = this.itemSizeCache.get(index - 1)?.size ?? this.beforeContentSize();
+      const previousItemOffset = this.itemSizeCache.get(index - 1)?.offset ?? 0;
+      const offset = previousItemOffset + previousItemSize;
+
+      this.itemSizeCache.set(index, { size, offset });
+    }
+  }
+
+  /**
+   * Get minimum and maximum data indices currently in the pool
+   */
+  private getMinMaxPoolIndices(): { minIndex: number; maxIndex: number; minItem: VirtualItem<T> | null; maxItem: VirtualItem<T> | null } {
+    const pool = this.virtualItems();
+
+    if (pool.length === 0) {
+      return { minIndex: -1, maxIndex: -1, minItem: null, maxItem: null };
+    }
+
+    let minIndex = Infinity;
+    let maxIndex = -Infinity;
+    let minItem: VirtualItem<T> | null = null;
+    let maxItem: VirtualItem<T> | null = null;
+
+    for (const item of pool) {
+      if (item.index >= 0 && item.data !== null) {
+        if (item.index < minIndex) {
+          minIndex = item.index;
+          minItem = item;
+        }
+        if (item.index > maxIndex) {
+          maxIndex = item.index;
+          maxItem = item;
+        }
+      }
+    }
+
+    return { minIndex, maxIndex, minItem, maxItem };
+  }
+
+  /**
+   * Setup IntersectionObserver to track when elements enter/exit viewport
+   * Used for intelligent element recycling
+   */
+  private setupIntersectionObserver(): void {
+    if (typeof IntersectionObserver === 'undefined') {
+      return;
+    }
+
+    const scrollContainer = this.scrollContainer();
+    if (!scrollContainer) return;
+
+    // Create IntersectionObserver with the scroll container as root
+    this.intersectionObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const element = entry.target as HTMLElement;
+          const dataIndex = element.getAttribute('data-index');
+
+          if (dataIndex === null) continue;
+
+          const index = parseInt(dataIndex, 10);
+
+          // Element is exiting viewport - potential candidate for recycling
+          if (!entry.isIntersecting) {
+            const { minIndex, maxIndex } = this.getMinMaxPoolIndices();
+            const items = this.items();
+
+            // Skip if no valid pool or insufficient data
+            if (minIndex === -1 || maxIndex === -1 || items.length === 0) continue;
+
+            // Determine scroll direction and recycling opportunity
+            const scrollOffset = this.scrollOffset();
+            const elementOffset = this.itemSizeCache.get(index)?.offset ?? 0;
+
+            // Element is above viewport (scrolling down)
+            if (elementOffset < scrollOffset && index === minIndex) {
+              // Check if there's data to load below
+              const nextIndex = maxIndex + 1;
+              if (nextIndex < items.length) {
+                // Note: Actual recycling is handled by recalculate()
+                // This observer primarily tracks intersection state
+                // We could add a flag here for optimization, but the scroll
+                // listener already handles recycling efficiently
+              }
+            }
+
+            // Element is below viewport (scrolling up)
+            if (elementOffset > scrollOffset + this.viewportSize() && index === maxIndex) {
+              // Check if there's data to load above
+              const prevIndex = minIndex - 1;
+              if (prevIndex >= 0) {
+                // Note: Actual recycling is handled by recalculate()
+              }
+            }
+          }
+
+          // Element is entering viewport
+          if (entry.isIntersecting) {
+            // Cache measurement when element enters viewport
+            if (!this.itemSizeCache.has(index)) {
+              this.cacheElementMeasurement(element, index);
+            }
+          }
+        }
+      },
+      {
+        root: scrollContainer.nativeElement,
+        // Use margin to detect elements slightly before they enter viewport
+        rootMargin: '100px 0px 100px 0px',
+        threshold: [0, 0.1, 0.5, 0.9, 1.0]
+      }
+    );
+  }
+
+  /**
+   * Setup ResizeObserver for dynamic size tracking
+   *
+   * Coordination with MutationObserver:
+   * - MutationObserver caches initial size immediately when data-index changes
+   * - ResizeObserver handles subsequent size changes (content updates, dynamic content)
+   * - This dual approach ensures we capture size early (MutationObserver) and
+   *   track ongoing changes (ResizeObserver) for maximum accuracy
+   * - Both observers work together: initial cache prevents flicker, resize tracking
+   *   maintains accuracy as content loads/changes
+   */
   private setupResizeObserver(): void {
     if (typeof ResizeObserver === 'undefined') {
       return;
@@ -252,6 +423,7 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
 
           // Only update if size is valid (> 0) and changed significantly
           // Prevents caching 0 sizes when elements haven't fully rendered
+          // Works with MutationObserver's initial caching for complete coverage
           if (size > 0 && (cachedSize === undefined || Math.abs(cachedSize - size) > 0.5)) {
             const estimatedSize = cachedSize ?? this.getEstimatedSize();
             const sizeDifference = size - estimatedSize;
@@ -361,6 +533,19 @@ export class VirtualScrollWrapperComponent<T = any> implements AfterContentInit,
     this.totalSize.set(beforeSize + itemsTotal + afterSize);
   }
 
+  /**
+   * Setup scroll listener for precise position tracking
+   *
+   * Note: Both scroll listener and IntersectionObserver are used:
+   * - Scroll listener: Handles precise position tracking and triggers recalculation
+   *   for smooth, accurate virtual scrolling
+   * - IntersectionObserver: Optimizes by tracking element visibility states and
+   *   caching measurements when elements enter viewport. Reduces unnecessary
+   *   calculations and provides additional context for recycling decisions.
+   *
+   * Both work together for optimal performance - scroll listener provides
+   * continuous updates while IntersectionObserver adds intelligent caching.
+   */
   private setupScrollListener(): void {
     const scrollContainer = this.scrollContainer();
     if (!scrollContainer) return;

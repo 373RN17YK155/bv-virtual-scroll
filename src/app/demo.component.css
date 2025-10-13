@@ -1,0 +1,135 @@
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.app-header {
+  padding: 2rem;
+  text-align: center;
+  color: white;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 2.5rem;
+  font-weight: 700;
+}
+
+.subtitle {
+  margin: 0.5rem 0 0 0;
+  font-size: 1.1rem;
+  opacity: 0.9;
+}
+
+.controls {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 12px;
+  margin: 0 2rem 1rem 2rem;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.mode-buttons {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.mode-btn {
+  padding: 0.75rem 1.5rem;
+  border: 2px solid #667eea;
+  background: white;
+  color: #667eea;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.mode-btn:hover {
+  background: #f0f0f0;
+  transform: translateY(-2px);
+}
+
+.mode-btn.active {
+  background: #667eea;
+  color: white;
+  box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
+}
+
+.mode-description {
+  padding: 1rem;
+  background: #f8f9ff;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.mode-description p {
+  margin: 0;
+  color: #555;
+  line-height: 1.6;
+}
+
+.metrics {
+  display: flex;
+  gap: 2rem;
+  flex-wrap: wrap;
+}
+
+.metric {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.metric-label {
+  font-weight: 600;
+  color: #666;
+}
+
+.metric-value {
+  color: #667eea;
+  font-weight: 700;
+}
+
+.scroll-demo {
+  flex: 1;
+  margin: 0 2rem 2rem 2rem;
+  background: white;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+  min-height: 0;
+}
+
+.scroll-demo.horizontal-mode {
+  display: flex;
+  flex-direction: column;
+}
+
+.scroll-header {
+  padding: 1rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  text-align: center;
+}
+
+.scroll-header h3 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.scroll-footer {
+  padding: 1rem;
+  background: #f8f9ff;
+  text-align: center;
+  color: #666;
+}
+
+.scroll-footer p {
+  margin: 0;
+}
+
